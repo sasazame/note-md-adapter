@@ -92,38 +92,75 @@ export class NoteClient {
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(2000); // Wait for editor to fully load
 
-    // Input title - try multiple selectors
+    // Input title with better handling
     console.log(chalk.blue('Setting article title...'));
     try {
-      // Try common title selectors
-      const titleSelectors = [
-        'input[placeholder*="タイトル"]',
-        'input[placeholder*="title" i]',
-        '[data-testid="title-input"]',
-        '.ProseMirror-title',
-        'h1[contenteditable="true"]',
-        '[role="textbox"][aria-label*="タイトル"]',
-        '[role="textbox"][aria-label*="title" i]'
-      ];
+      // Wait a bit more for the editor to fully initialize
+      await this.page.waitForTimeout(3000);
       
-      let titleInput = null;
-      for (const selector of titleSelectors) {
-        try {
-          titleInput = await this.page.waitForSelector(selector, { timeout: 2000 });
-          if (titleInput) break;
-        } catch {
-          continue;
+      // Try to find the title input area
+      const titleSet = await this.page.evaluate(async (titleText) => {
+        // Look for various possible title elements
+        const titleSelectors = [
+          'input[placeholder*="タイトル"]',
+          'input[placeholder*="title" i]',
+          '[contenteditable="true"]:first-of-type',
+          '.ProseMirror-title',
+          'h1[contenteditable="true"]',
+          '[role="textbox"]:first-of-type',
+          '.editor-title',
+          '[data-placeholder*="タイトル"]'
+        ];
+        
+        for (const selector of titleSelectors) {
+          try {
+            const element = document.querySelector(selector) as HTMLElement;
+            if (element) {
+              element.focus();
+              element.click();
+              
+              // Clear existing content
+              if ('value' in element) {
+                (element as HTMLInputElement).value = '';
+                (element as HTMLInputElement).value = titleText;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+              } else if (element.contentEditable === 'true') {
+                // For contenteditable elements
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+                
+                // Clear and set new text
+                element.textContent = titleText;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+              
+              return true;
+            }
+          } catch (err) {
+            continue;
+          }
         }
-      }
+        return false;
+      }, title);
       
-      if (!titleInput) {
-        throw new Error('Could not find title input');
+      if (titleSet) {
+        console.log(chalk.green('Title set successfully'));
+        // Move to content area
+        await this.page.keyboard.press('Tab');
+      } else {
+        // Fallback: Try keyboard input at the beginning
+        console.log(chalk.yellow('Trying alternative title input method...'));
+        
+        // Try to click at the top of the page and type
+        await this.page.mouse.click(100, 100);
+        await this.page.keyboard.type(title);
+        await this.page.keyboard.press('Tab');
       }
-      
-      await titleInput.click();
-      await titleInput.fill(title);
     } catch (error) {
-      console.log(chalk.yellow('Could not set title directly. Will proceed with content.'));
+      console.log(chalk.yellow('Could not set title. Please set it manually after import.'));
     }
 
     // Process content blocks
@@ -380,24 +417,50 @@ export class NoteClient {
         });
         
         if (pasted) {
-          // Wait for image to upload - reduced for better performance
-          await this.page.waitForTimeout(2000); 
-          
-          // Verify image was added
-          const hasNewImage = await this.page.evaluate(() => {
-            const images = document.querySelectorAll('img');
-            return images.length > 0;
+          // Wait for image upload to complete by monitoring DOM changes
+          const imageUploaded = await this.page.evaluate(async () => {
+            const initialImageCount = document.querySelectorAll('img').length;
+            
+            // Wait for up to 10 seconds for a new image to appear
+            for (let i = 0; i < 20; i++) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              const currentImageCount = document.querySelectorAll('img').length;
+              
+              if (currentImageCount > initialImageCount) {
+                // Check if the new image is fully loaded
+                const images = document.querySelectorAll('img');
+                const lastImage = images[images.length - 1] as HTMLImageElement;
+                
+                // Wait for the image to have a src and be loaded
+                if (lastImage && lastImage.src && lastImage.complete) {
+                  return true;
+                }
+              }
+              
+              // Also check for upload indicators
+              const uploadingIndicators = document.querySelectorAll('[class*="upload"], [class*="loading"], [class*="progress"]');
+              if (uploadingIndicators.length === 0 && currentImageCount > initialImageCount) {
+                return true;
+              }
+            }
+            return false;
           });
           
-          if (hasNewImage) {
-            console.log(chalk.green(`Image pasted successfully: ${imagePath}`));
+          if (imageUploaded) {
+            console.log(chalk.green(`Image uploaded successfully: ${imagePath}`));
+            
+            // Additional wait to ensure the editor is ready
+            await this.page.waitForTimeout(1000);
             
             // Ensure cursor is after the image
             await this.page.keyboard.press('End');
             await this.page.keyboard.press('Enter');
             await this.page.keyboard.press('Enter');
           } else {
-            console.log(chalk.yellow(`Image paste completed but image not detected`));
+            console.log(chalk.yellow(`Image upload may have failed or timed out: ${imagePath}`));
+            // Still add some space for the next content
+            await this.page.keyboard.press('Enter');
+            await this.page.keyboard.press('Enter');
           }
         }
       } catch (pasteError) {

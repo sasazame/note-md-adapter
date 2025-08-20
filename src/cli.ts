@@ -66,10 +66,26 @@ program
       const blocks = await parser.parseMarkdownFile(articlePath);
       console.log(chalk.gray(`Parsed ${blocks.length} content blocks`));
 
+      // Determine title - use first H1 if no title specified or if title is default
+      let articleTitle = options.title;
+      if (articleTitle === 'Untitled') {
+        // Look for first H1 heading in blocks
+        const firstHeading = blocks.find(block => block.type === 'heading' && block.level === 1);
+        if (firstHeading && firstHeading.content) {
+          articleTitle = firstHeading.content;
+          console.log(chalk.blue(`Using H1 from markdown as title: "${articleTitle}"`));
+          // Remove the H1 from blocks to avoid duplication
+          const headingIndex = blocks.indexOf(firstHeading);
+          if (headingIndex !== -1) {
+            blocks.splice(headingIndex, 1);
+          }
+        }
+      }
+
       // Create article
       const isDraft = options.status === 'draft';
-      console.log(chalk.blue(`Creating article: "${options.title}" (${options.status})...`));
-      await client.createArticle(options.title, blocks, isDraft);
+      console.log(chalk.blue(`Creating article: "${articleTitle}" (${options.status})...`));
+      await client.createArticle(articleTitle, blocks, isDraft);
 
       console.log(chalk.green('Article imported successfully!'));
       console.log(chalk.gray('You can now review and publish it on note.com'));
