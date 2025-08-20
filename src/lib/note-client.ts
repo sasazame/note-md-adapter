@@ -92,72 +92,52 @@ export class NoteClient {
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(2000); // Wait for editor to fully load
 
-    // Input title with better handling
+    // Input title - target the specific textarea element
     console.log(chalk.blue('Setting article title...'));
     try {
-      // Wait a bit more for the editor to fully initialize
+      // Wait for the editor to fully initialize
       await this.page.waitForTimeout(3000);
       
-      // Try to find the title input area
-      const titleSet = await this.page.evaluate(async (titleText) => {
-        // Look for various possible title elements
-        const titleSelectors = [
-          'input[placeholder*="タイトル"]',
-          'input[placeholder*="title" i]',
-          '[contenteditable="true"]:first-of-type',
-          '.ProseMirror-title',
-          'h1[contenteditable="true"]',
-          '[role="textbox"]:first-of-type',
-          '.editor-title',
-          '[data-placeholder*="タイトル"]'
-        ];
-        
-        for (const selector of titleSelectors) {
-          try {
-            const element = document.querySelector(selector) as HTMLElement;
-            if (element) {
-              element.focus();
-              element.click();
-              
-              // Clear existing content
-              if ('value' in element) {
-                (element as HTMLInputElement).value = '';
-                (element as HTMLInputElement).value = titleText;
-                element.dispatchEvent(new Event('input', { bubbles: true }));
-              } else if (element.contentEditable === 'true') {
-                // For contenteditable elements
-                const selection = window.getSelection();
-                const range = document.createRange();
-                range.selectNodeContents(element);
-                selection?.removeAllRanges();
-                selection?.addRange(range);
-                
-                // Clear and set new text
-                element.textContent = titleText;
-                element.dispatchEvent(new Event('input', { bubbles: true }));
-              }
-              
-              return true;
-            }
-          } catch (err) {
-            continue;
-          }
-        }
-        return false;
-      }, title);
+      // Look for the title textarea
+      const titleTextarea = await this.page.$('textarea[placeholder="記事タイトル"]');
       
-      if (titleSet) {
+      if (titleTextarea) {
+        // Click and fill the title textarea
+        await titleTextarea.click();
+        await titleTextarea.fill(title);
         console.log(chalk.green('Title set successfully'));
+        
         // Move to content area
         await this.page.keyboard.press('Tab');
       } else {
-        // Fallback: Try keyboard input at the beginning
-        console.log(chalk.yellow('Trying alternative title input method...'));
+        // Fallback: try other selectors
+        const alternativeSelectors = [
+          'textarea[placeholder*="タイトル"]',
+          'textarea[placeholder*="title" i]',
+          'textarea.heevId', // The class name from your observation
+          'textarea[spellcheck="true"]'
+        ];
         
-        // Try to click at the top of the page and type
-        await this.page.mouse.click(100, 100);
-        await this.page.keyboard.type(title);
-        await this.page.keyboard.press('Tab');
+        let titleSet = false;
+        for (const selector of alternativeSelectors) {
+          try {
+            const element = await this.page.$(selector);
+            if (element) {
+              await element.click();
+              await element.fill(title);
+              titleSet = true;
+              console.log(chalk.green('Title set using fallback selector'));
+              await this.page.keyboard.press('Tab');
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        
+        if (!titleSet) {
+          console.log(chalk.yellow('Could not find title textarea. Please set title manually.'));
+        }
       }
     } catch (error) {
       console.log(chalk.yellow('Could not set title. Please set it manually after import.'));
@@ -417,51 +397,55 @@ export class NoteClient {
         });
         
         if (pasted) {
-          // Wait for image upload to complete by monitoring DOM changes
-          const imageUploaded = await this.page.evaluate(async () => {
-            const initialImageCount = document.querySelectorAll('img').length;
+          console.log(chalk.gray('Waiting for image upload to complete...'));
+          
+          // Simple but more reliable approach: just wait longer
+          // note.com seems to need significant time to process images
+          await this.page.waitForTimeout(8000); // 8 seconds base wait
+          
+          // Check if image exists and is stable
+          const imageStable = await this.page.evaluate(async () => {
+            // Wait additional time and monitor
+            let previousImageCount = document.querySelectorAll('img').length;
+            let stableChecks = 0;
             
-            // Wait for up to 10 seconds for a new image to appear
-            for (let i = 0; i < 20; i++) {
-              await new Promise(resolve => setTimeout(resolve, 500));
+            for (let i = 0; i < 10; i++) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
               const currentImageCount = document.querySelectorAll('img').length;
               
-              if (currentImageCount > initialImageCount) {
-                // Check if the new image is fully loaded
-                const images = document.querySelectorAll('img');
-                const lastImage = images[images.length - 1] as HTMLImageElement;
-                
-                // Wait for the image to have a src and be loaded
-                if (lastImage && lastImage.src && lastImage.complete) {
-                  return true;
+              if (currentImageCount === previousImageCount && currentImageCount > 0) {
+                stableChecks++;
+                if (stableChecks >= 3) {
+                  // Check that images have valid URLs (not blob or data)
+                  const images = document.querySelectorAll('img');
+                  const lastImage = images[images.length - 1] as HTMLImageElement;
+                  if (lastImage && lastImage.src && 
+                      !lastImage.src.startsWith('blob:') && 
+                      !lastImage.src.startsWith('data:')) {
+                    return true;
+                  }
                 }
-              }
-              
-              // Also check for upload indicators
-              const uploadingIndicators = document.querySelectorAll('[class*="upload"], [class*="loading"], [class*="progress"]');
-              if (uploadingIndicators.length === 0 && currentImageCount > initialImageCount) {
-                return true;
+              } else {
+                stableChecks = 0;
+                previousImageCount = currentImageCount;
               }
             }
+            
             return false;
           });
           
-          if (imageUploaded) {
-            console.log(chalk.green(`Image uploaded successfully: ${imagePath}`));
-            
-            // Additional wait to ensure the editor is ready
-            await this.page.waitForTimeout(1000);
-            
-            // Ensure cursor is after the image
-            await this.page.keyboard.press('End');
-            await this.page.keyboard.press('Enter');
-            await this.page.keyboard.press('Enter');
+          if (imageStable) {
+            console.log(chalk.green(`Image uploaded and stabilized: ${imagePath}`));
           } else {
-            console.log(chalk.yellow(`Image upload may have failed or timed out: ${imagePath}`));
-            // Still add some space for the next content
-            await this.page.keyboard.press('Enter');
-            await this.page.keyboard.press('Enter');
+            console.log(chalk.yellow(`Image upload uncertain, proceeding with caution: ${imagePath}`));
+            // Extra safety wait
+            await this.page.waitForTimeout(5000);
           }
+          
+          // Always add space after image attempt
+          await this.page.keyboard.press('End');
+          await this.page.keyboard.press('Enter');
+          await this.page.keyboard.press('Enter');
         }
       } catch (pasteError) {
         console.log(chalk.yellow(`Paste method failed: ${pasteError}`));

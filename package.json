@@ -1,6 +1,6 @@
 {
   "name": "note-md-adapter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI tool to import Markdown articles to note.com via browser automation",
   "main": "dist/index.js",
   "type": "module",
