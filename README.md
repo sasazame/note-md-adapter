@@ -21,7 +21,7 @@ Markdownで書いた記事を[note](https://note.com)に自動投稿するCLIツ
 ### 1. リポジトリをクローン
 
 ```bash
-git clone https://github.com/yourusername/note-md-adapter.git
+git clone https://github.com/sasazame/note-md-adapter.git
 cd note-md-adapter
 ```
 
