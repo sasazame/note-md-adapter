@@ -145,6 +145,15 @@ export class NoteClient {
 
     // Process content blocks
     console.log(chalk.blue('Adding content blocks...'));
+    
+    // Click on content area once at the beginning to focus
+    const contentArea = await this.page.$('.ProseMirror, [contenteditable="true"], .note-body');
+    if (contentArea) {
+      await contentArea.click();
+      // IMPORTANT: Move cursor to the end of entire document
+      await this.page.keyboard.press('Control+End');
+    }
+    
     for (const block of blocks) {
       await this.addContentBlock(block);
       await this.page.waitForTimeout(500); // Small delay between blocks
@@ -182,66 +191,25 @@ export class NoteClient {
   private async addHeading(text: string, level: number): Promise<void> {
     if (!this.page) throw new Error('Page not initialized');
     
-    // Try to find and click on the main content area
-    const contentSelectors = [
-      '.ProseMirror',
-      '[contenteditable="true"]',
-      '.note-body',
-      '.editor-content',
-      '[role="textbox"]'
-    ];
-    
-    let contentArea = null;
-    for (const selector of contentSelectors) {
-      try {
-        contentArea = await this.page.$(selector);
-        if (contentArea) break;
-      } catch {
-        continue;
-      }
-    }
-    
-    if (contentArea) {
-      await contentArea.click();
-    }
+    // Don't click on content area - just type where cursor is
+    // Clicking might select existing content (like images) and overwrite them
     
     // Add heading markdown style (note may convert it)
     const headingPrefix = '#'.repeat(level) + ' ';
     await this.page.keyboard.type(headingPrefix + text);
-    await this.page.keyboard.press('Enter');
-    await this.page.keyboard.press('Enter');
+    await this.page.keyboard.press('Enter'); // Move to next line
   }
 
   private async addText(text: string): Promise<void> {
     if (!this.page) throw new Error('Page not initialized');
     
-    // Try to find and click on the main content area
-    const contentSelectors = [
-      '.ProseMirror',
-      '[contenteditable="true"]',
-      '.note-body',
-      '.editor-content',
-      '[role="textbox"]'
-    ];
-    
-    let contentArea = null;
-    for (const selector of contentSelectors) {
-      try {
-        contentArea = await this.page.$(selector);
-        if (contentArea) break;
-      } catch {
-        continue;
-      }
-    }
-    
-    if (contentArea) {
-      await contentArea.click();
-    }
+    // Don't click on content area - just type where cursor is
+    // Clicking might select existing content (like images) and overwrite them
     
     // Type the text
     await this.page.keyboard.type(text);
-    await this.page.keyboard.press('Enter');
-    await this.page.keyboard.press('Enter');
+    await this.page.keyboard.press('Enter'); // Move to next line
+    await this.page.keyboard.press('Enter'); // Add blank line to separate paragraphs
   }
 
   private async addImage(imagePath: string, alt?: string): Promise<void> {
@@ -280,8 +248,14 @@ export class NoteClient {
         return;
       }
 
-      // Click to focus
-      await contentArea.click();
+      // CRITICAL: Ensure cursor is at the very end before pasting image
+      // Use multiple methods to ensure we're really at the end
+      await this.page.keyboard.press('Control+End'); // Go to document end
+      await this.page.waitForTimeout(100); // Small wait
+      
+      // Double-check by pressing End key as well (for current line)
+      await this.page.keyboard.press('End');
+      await this.page.waitForTimeout(100);
       
       // Clear any existing clipboard content first
       await this.page.evaluate(() => {
@@ -442,10 +416,12 @@ export class NoteClient {
             await this.page.waitForTimeout(5000);
           }
           
-          // Always add space after image attempt
-          await this.page.keyboard.press('End');
-          await this.page.keyboard.press('Enter');
-          await this.page.keyboard.press('Enter');
+          // IMPORTANT: After image upload, we need to:
+          // 1. Move cursor to the end of DOCUMENT (not just line)
+          // 2. Add ONE Enter to move to next line
+          await this.page.keyboard.press('Control+End'); // Ensure cursor is at the end of document
+          await this.page.keyboard.press('Enter'); // Move to next line
+          console.log(chalk.gray('Cursor positioned at document end after image'));
         }
       } catch (pasteError) {
         console.log(chalk.yellow(`Paste method failed: ${pasteError}`));
