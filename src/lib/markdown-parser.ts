@@ -46,9 +46,11 @@ export class MarkdownParser {
           blocks.push({ type: 'paragraph', content: currentBlock });
           currentBlock = '';
         }
+        // Use the path from markdown directly, resolving relative to the markdown file location
+        const imagePath = imgMatch[1].startsWith('/') ? imgMatch[1] : join(baseDir, imgMatch[1]);
         blocks.push({
           type: 'image',
-          src: join(baseDir, 'images', imgMatch[1].split('/').pop() || ''),
+          src: imagePath,
           alt: imgMatch[2] || ''
         });
         continue;

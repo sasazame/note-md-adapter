@@ -59,15 +59,17 @@ node dist/cli.js login
 
 #### ディレクトリ構造
 
-記事ディレクトリは以下の構造にしてください：
+記事ディレクトリには`article.md`ファイルが必要です。画像ファイルはMarkdown内のパスに従って配置してください：
 
 ```
 my-article/
-├── article.md      # Markdown記事
-└── images/         # 画像ファイル
+├── article.md      # Markdown記事（必須）
+└── images/         # 画像ファイル（任意のディレクトリ構造可）
     ├── image1.jpg
     └── image2.png
 ```
+
+> **Note**: 画像パスはMarkdown内で指定されたパスを使用します。相対パスは`article.md`からの相対パスとして解決されます。
 
 #### 投稿コマンド
 
